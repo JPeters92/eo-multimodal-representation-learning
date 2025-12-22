@@ -1,0 +1,19 @@
+name: emb-venv
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12.3
+
+  # Core conda packages
+  - pytorch=2.4.0
+  - pytorch-cuda=12.1
+  - lightning=2.4.0
+  - xarray=2024.9.0
+  - zarr=2.18.3
+  - numpy
+  - pip
+
+  - pip:
+      - spyndex==0.6.0
