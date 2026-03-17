@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import random
 import re
 from pathlib import Path
 from typing import Dict, Set, List, Tuple, Optional
@@ -26,10 +25,6 @@ FILE_PATTERNS = [
     "ICOSETC_*_FLUXNET_DD_01.csv",
     "FLX_*_FLUXNET2015_FULLSET_DD_*_beta-3.csv",
 ]
-
-# Train/val split
-RNG_SEED = 42
-N_TRAIN  = 28
 
 # Minimum year to consider (flux + cube timestamps)
 MIN_YEAR = 2017
@@ -262,11 +257,8 @@ if __name__ == "__main__":
             if not has_flux:
                 missing_flux.append(cid)
 
-    # 5) Reproducible split
-    random.Random(RNG_SEED).shuffle(candidate_ids)
-    n_train = min(N_TRAIN, len(candidate_ids))
-    train_ids = sorted(candidate_ids[:n_train])
-    val_ids   = sorted(candidate_ids[n_train:])
+    # 5) Keep all candidate cubes together
+    selected_ids = sorted(candidate_ids)
 
     # 6) Summary
     print(f"Found feature cubes: {len(feature_ids)}")
@@ -278,11 +270,8 @@ if __name__ == "__main__":
     if missing_flux:
         print(f"⚠️ Cubes with no flux files:  {sorted(missing_flux)}")
 
-    print("\n# -------- TRAIN (28 or fewer if limited) --------")
-    print(f"train_cubes = {train_ids}")
-
-    print("\n# -------------- VALIDATION --------------------")
-    print(f"val_cubes   = {val_ids}")
+    print("\n# ---------------- SELECTED CUBES ----------------")
+    print(f"cubes = {selected_ids}")
 
     # 7) Year coverage (≥ MIN_YEAR) & valid timestamp counts
     print("\n# ============== YEAR COVERAGE ≥ {0} & VALID TIMESTAMPS ==============".format(MIN_YEAR))
