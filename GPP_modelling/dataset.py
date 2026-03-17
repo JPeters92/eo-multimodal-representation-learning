@@ -17,12 +17,25 @@ OUT_DIR  = Path("/net/data_ssd/deepfeatures/sciencecubes_processed")
 # Process these cubes; by default use all known keys from sites_dict
 # (Replace with a manual subset if you like)
 
-CUBE_IDS = [ "003", "008","005", "028", "027", "036", "011", "021", "022"]
+CUBE_IDS = [ "003", "008", "005", "028", "027", "036", "011", "021", "022"]
 
+# Feature source to use for GPP dataset creation.
+# "ucm_flux" reads the original processed cube with flux-aware UCM filling.
+# "linear" reads the output written by GPP_modelling/linear.py.
+FEATURE_SOURCE = "linear"
 
-
-VAR_NAME = "feature_mean_ucm"
-VAR_NAME = "linear"
+FEATURE_SOURCE_CONFIG = {
+    "ucm_flux": {
+        "path_template": "s1_s2_{cid}_v_mean_ucm_flux.zarr",
+        "var_name": "feature_mean_ucm",
+        "output_tag": "ucm_flux",
+    },
+    "linear": {
+        "path_template": "s1_s2_{cid}_v_mean_linear.zarr",
+        "var_name": "feature_mean_linear",
+        "output_tag": "linear",
+    },
+}
 WINDOW   = 90
 OVERLAP  = 80  # erlaubte Überlappung in Tagen
 assert 0 <= OVERLAP < WINDOW, "OVERLAP muss in [0, WINDOW) liegen"
@@ -37,7 +50,7 @@ YEARS_OF_INTEREST = TRAIN_YEARS | VAL_YEARS  # Will trim cubes to these years
 # Options:
 #   "include" -> keep radiation feature and standardize it with RAD_MEAN/RAD_STD
 #   "exclude" -> drop radiation feature entirely from inputs
-RADIATION_MODE = "include"   # change to "exclude" to drop radiation
+RADIATION_MODE = "exclude"   # change to "exclude" to drop radiation
 
 # --- global standardization constants (used if RADIATION_MODE == "include") ---
 RAD_MEAN = 28.8545
@@ -65,34 +78,25 @@ def detect_flux_years_for_site(site: str, root: Path) -> Set[int]:
             if _site_in_filename(site, p.name):
                 years.update({2017, 2018, 2019, 2020})
                 break
-    for dpat in ["ICOS_2021_I", "ICOS_2022_I", "ICOS_2023_I", "ICOS_2024_I"]:
-        d = root / dpat
-        if not d.exists():
-            continue
-        try:
-            y = int(dpat.split("_")[1])
-        except Exception:
-            continue
-        for p in d.glob("ICOSETC_*_FLUXNET_DD_01.csv"):
-            if _site_in_filename(site, p.name):
-                years.add(y)
-                break
-    # Restrict to 2017..2024 as in your original
-    return {y for y in years if 2017 <= y <= 2024}
+    return {y for y in years if 2017 <= y <= 2020}
 
 def _safe(da: xr.DataArray) -> xr.DataArray:
     return xr.where(np.isfinite(da), da, np.nan)
 
 def _open_cube_da(cid: str) -> Tuple[xr.DataArray, Optional[int]]:
     """Open (feature,time) DataArray + radiation index."""
-    z = IN_DIR / f"s1_s2_{cid}_v_mean_ucm_flux.zarr"
+    if FEATURE_SOURCE not in FEATURE_SOURCE_CONFIG:
+        raise ValueError(f"Unknown FEATURE_SOURCE: {FEATURE_SOURCE}")
+    cfg = FEATURE_SOURCE_CONFIG[FEATURE_SOURCE]
+    z = IN_DIR / cfg["path_template"].format(cid=cid)
     if not z.exists():
         raise FileNotFoundError(z)
     ds = xr.open_zarr(z, consolidated=True)
-    if VAR_NAME not in ds:
-        raise KeyError(f"{VAR_NAME} not in {z}")
-    da = _safe(ds[VAR_NAME]).sortby("time")
-    ridx = ds[VAR_NAME].attrs.get("radiation_feature_index", None)
+    var_name = cfg["var_name"]
+    if var_name not in ds:
+        raise KeyError(f"{var_name} not in {z}")
+    da = _safe(ds[var_name]).sortby("time")
+    ridx = ds[var_name].attrs.get("radiation_feature_index", None)
     return da, int(ridx) if ridx is not None else None
 
 def _parse_date_col(df: pd.DataFrame) -> pd.Series:
@@ -131,30 +135,14 @@ def _load_fluxnet_daily_gpp(site: str) -> pd.Series:
     ww_dir = ROOT_DIR / "FLUXNET2020-ICOS-WarmWinter"
     if ww_dir.exists():
         files += list(ww_dir.glob(f"FLX_*{site}*_FLUXNET2015_FULLSET_DD_*_beta-3.csv"))
-    for year in range(2021, 2025):
-        d = ROOT_DIR / f"ICOS_{year}_I"
-        if d.exists():
-            files += list(d.glob(f"ICOSETC_*{site}*_FLUXNET_DD_01.csv"))
     if not files:
-        raise FileNotFoundError(f"No FLUXNET DD files for site {site}")
-
-    def _priority(p: Path) -> tuple:
-        name = p.name
-        if "ICOSETC_" in name:
-            m = re.search(r"ICOS_(\d{4})_I", str(p.parent))
-            yr = int(m.group(1)) if m else 0
-            return (0, -yr)
-        return (1, 0)
-
-    files.sort(key=_priority)
+        raise FileNotFoundError(f"No FLUXNET WarmWinter DD files for site {site}")
 
     parts: List[pd.Series] = []
 
     for f in files:
         #df = pd.read_csv(f, low_memory=False)
         df = pd.read_csv(f, low_memory=False, encoding="utf-8-sig")
-        print(df)
-        print(f)
         dt = _parse_date_col(df)
 
         gcol = _choose_gpp_column(df.columns.tolist())
@@ -347,6 +335,7 @@ def main():
     # Save outputs
     # =======================
     rad_tag = "rad" if RADIATION_MODE.lower() == "include" else "noRad"
+    source_tag = FEATURE_SOURCE_CONFIG[FEATURE_SOURCE]["output_tag"]
     years_tag_tr = f"{min(TRAIN_YEARS)}-{max(TRAIN_YEARS)}"
     years_tag_va = "-".join(str(y) for y in sorted(VAL_YEARS))
 
@@ -356,8 +345,8 @@ def main():
         y_tr = np.concatenate(y_tr_list, axis=0)
         meta_tr = pd.concat(meta_tr_list, ignore_index=True)
 
-        npz_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{rad_tag}_gppstd_train.npz"
-        csv_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{rad_tag}_train.csv"
+        npz_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{rad_tag}_gppstd_train.npz"
+        csv_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{rad_tag}_train.csv"
 
         np.savez_compressed(npz_tr, X=X_tr, y=y_tr)
         meta_tr.to_csv(csv_tr, index=False)
@@ -375,8 +364,8 @@ def main():
         y_va = np.concatenate(y_va_list, axis=0)
         meta_va = pd.concat(meta_va_list, ignore_index=True)
 
-        npz_va = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{rad_tag}_gppstd_val.npz"
-        csv_va = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{rad_tag}_val.csv"
+        npz_va = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{rad_tag}_gppstd_val.npz"
+        csv_va = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{rad_tag}_val.csv"
 
         np.savez_compressed(npz_va, X=X_va, y=y_va)
         meta_va.to_csv(csv_va, index=False)
