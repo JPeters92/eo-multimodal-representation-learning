@@ -21,7 +21,7 @@ feat_template = "/net/data_ssd/deepfeatures/trainingcubes_processed/s1_s2_000{cu
 # Output
 out_dir = "paper_vis"
 os.makedirs(out_dir, exist_ok=True)
-pdf_path = os.path.join(out_dir, "paper_figure_S2_PCA_selected_cubes.pdf")
+pdf_path = os.path.join(out_dir, "S1_S2_PCA.pdf")
 
 DPI = 300  # high DPI for paper
 
