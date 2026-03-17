@@ -1,14 +1,13 @@
 import os
 import gc
 import torch
-import rasterio
 import stackstac
 import numpy as np
 import xarray as xr
 import pandas as pd
 import planetary_computer as pc
-from typing import Tuple, Dict, List
-from utils.utils import compute_time_gaps
+from typing import Tuple, Dict
+from dataset.utils import compute_time_gaps
 from pystac_client import Client
 from rasterio.enums import Resampling
 from dataset.prepare_dataarray import prepare_spectral_data

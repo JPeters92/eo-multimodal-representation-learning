@@ -5,7 +5,7 @@ import random
 import numpy as np
 import xarray as xr
 from typing import Dict
-from utils.utils import compute_time_gaps
+from dataset.utils import compute_time_gaps
 from dataset.prepare_dataarray import prepare_spectral_data
 from dataset.preprocess_sentinel import match_sentinel1_to_s2_cube, extract_sentinel_patches, nearest_indices
 
@@ -104,9 +104,7 @@ def process_cube(cube_num, sentinel_set='s2'):
     chunks = {"time": da.sizes["time"], "y": 90, "x": 90}
     da = da.chunk(chunks)
 
-    if sentinel_set == 'si':
-        da = prepare_spectral_data(da, to_ds=False, compute_SI=True, load_b01b09=True)
-    else: da = prepare_spectral_data(da, to_ds=False)
+    da = prepare_spectral_data(da, to_ds=False)
 
     #da = da.sel(index="B02").expand_dims(index=1)
     coords = {dim: da.coords[dim].values for dim in da.dims if dim in ["time", "y", "x"]}
@@ -121,7 +119,6 @@ def process_cube(cube_num, sentinel_set='s2'):
 
         # Lazily align S1 to S2 times: 1 S1 slice per S2 time (nearest)
         # (optional) add tolerance="3D" or similar if you want a max gap
-        #s1_matched = s1.backscatter.sel(time=s2_times_used, method="nearest")  # (time, band, y, x)
         s1_matched = s1.backscatter.isel(time=xr.DataArray(nearest_idx, dims=["time"]))
 
         s1_matched = s1_matched.assign_coords(time=s2_times_used)
@@ -138,9 +135,6 @@ def process_cube(cube_num, sentinel_set='s2'):
             compat="override",
             join="outer",
         )
-
-        # Give different variable names to avoid conflicts
-        #combined_BTYX = xr.merge({"s2": s2_BTYX, "s1": s1}, compat="override", join="outer")
 
         # Also pass the matched S1 times so the extractor returns coords['time_add']
         matched_s1_times = s1_times[nearest_idx]  # (T_s2,)
@@ -225,8 +219,6 @@ current_train_size = 0
 batch_size = 1
 from time import time
 sentinel_ds = 's1_s2'
-#sentinel_ds = 'si'
-
 dataset = 'test'
 
 
@@ -247,7 +239,6 @@ with h5py.File(file_name, "w") as train_file:
     # Initialize expandable datasets for train
     if sentinel_ds =='s1_s2': train_shape = (11, 12, 15, 15)  # Train data shape (e.g., (209, 11, 15, 15))
     elif sentinel_ds == 's1': train_shape = (11, 2, 15, 15)
-    elif sentinel_ds == 'si': train_shape = (11, 149, 15, 15)
     else: train_shape = (11, 10, 15, 15)
     mask_shape = train_shape  # Masks have the same shape as the data
 
