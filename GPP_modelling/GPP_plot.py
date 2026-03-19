@@ -33,11 +33,11 @@ CUBE_IDS = [ "003", "027", "022" ]
 FEATURE_SOURCE = "linear"
 FEATURE_SOURCE_CONFIG = {
     "ucm_flux": {
-        "path_template": "s1_s2_{cid}_v_mean_ucm_flux.zarr",
+        "path_template": "s1_s2_{cid}_mean_ucm_flux.zarr",
         "var_name": "feature_mean_ucm",
     },
     "linear": {
-        "path_template": "s1_s2_{cid}_v_mean_linear.zarr",
+        "path_template": "s1_s2_{cid}_mean_linear.zarr",
         "var_name": "feature_mean_linear",
     },
 }
