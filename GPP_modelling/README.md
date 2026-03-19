@@ -69,15 +69,9 @@ Purpose:
 - creates per-cube and combined multi-site plots
 - reports RMSE and NRMSE
 
-This is the main evaluation and visualization script in the directory.
-
-## Visualization
-
-The current combined comparison figure is:
-
-- [`gpp_compare_combined_7feat_bottomlegend.png`](gpp_compare_out/gpp_compare_combined_7feat_bottomlegend.png)
+This visualization script produced the following comparison figure ([`gpp_compare_combined_7feat_bottomlegend.png`](gpp_compare_out/gpp_compare_combined_7feat_bottomlegend.png)):
 
 <img src="./gpp_compare_out/gpp_compare_combined_7feat_bottomlegend.png" alt="Combined 7-feature GPP comparison" width="270">
 
 
-This is the visualization produced by [`GPP_plot.py`](GPP_plot.py).
+
