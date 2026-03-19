@@ -12,7 +12,7 @@ Purpose:
 - contains the encoder and decoder used for Sentinel-1, Sentinel-2, or other prepared band stacks
 - provides the Lightning training module for reconstruction-based pretraining
 
-<img src="./figures/ModalityEncoder.png" alt="Modality-specific autoencoder" width="220">
+<img src="./figures/ModalityEncoder.png" alt="Modality-specific autoencoder" width="350">
 
 ### 2. Fusion model
 
@@ -23,7 +23,7 @@ Purpose:
 - fuses Sentinel-1 and Sentinel-2 representations in a shared latent space
 - reconstructs both modalities from the fused representation
 
-<img src="./figures/FusionModel.png" alt="Fusion model" width="220">
+<img src="./figures/FusionModel.png" alt="Fusion model" width="350">
 
 ### 3. Shared model blocks
 
@@ -32,8 +32,7 @@ Use [`model_blocks.py`](model_blocks.py).
 Purpose:
 - provides reusable encoder and decoder blocks
 - contains the dimensionality reduction and upscaling modules used by the autoencoders
-
-These blocks are used by both the modality-specific and fusion models.
+- these blocks are used by both the modality-specific and fusion models.
 
 ### 4. Attention components
 
