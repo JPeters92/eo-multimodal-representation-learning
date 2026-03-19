@@ -1,10 +1,8 @@
 # Feature Cube Module
 
 This module contains the scripts for generating and inspecting the latent feature cubes used in the downstream workflows.
-
-## Scope
-
-The main output of this module is a feature cube stored as a `.zarr` dataset. These cubes are created from the trained representation models and are later used, for example, in the GPP use case.
+The main output of this module is a feature cube stored as a `.zarr` dataset. 
+These cubes are created from the trained representation models and are later used, for example, in the GPP use case.
 
 ## Scripts
 
