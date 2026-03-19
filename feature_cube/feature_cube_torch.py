@@ -134,7 +134,9 @@ def _extract_worker(args_tuple):
         time_sub,
         y_sub,
         x_sub,
+        logger_name=worker_logger_name,
         time_coords_2=time_sub_2,
+        inference=True,
         **extractor_kwargs,
     )
 
