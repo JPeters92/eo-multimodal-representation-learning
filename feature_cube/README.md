@@ -54,9 +54,9 @@ Generated paths:
 
 ### 2. Cube verification
 
-Execute [`verify_cube.py`](verify_cube.py) for a quick inspection of an existing feature cube.
+Execute [`verify_cube_completeness.py`](verify_cube_completeness.py) for a quick inspection of an existing feature cube.
 
-This script opens a `.zarr` feature cube and reports NaN statistics per timestep and over the full cube.
+This script opens a `.zarr` feature cube and reports creation progress and NaN statistics per timestep over the full cube.
 
 ### 3. Paper visualization
 
