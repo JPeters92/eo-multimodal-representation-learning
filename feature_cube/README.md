@@ -10,31 +10,22 @@ These cubes are created from the trained representation models and are later use
 
 Execute [`feature_cube_torch.py`](feature_cube_torch.py). The script supports argparse-based runtime configuration.
 
-Default CLI settings:
-- `--cuda-device cuda:0`                                            # GPU used for inference
-- `--batch-size 64`                                                 # Number of patches per forward pass
-- `--base-path /net/data/deepfeatures/trainingcubes`                # Input directory of the Sentinel-2 base cubes
-- `--merged-path /net/data_ssd/deepfeatures/s1_s2_cubes`            # Cache directory for merged Sentinel-1/2 cubes
-- `--output-path /net/data_ssd/deepfeatures/sciencecubes_processed` # Output directory for the final feature cubes
-- `--checkpoint-path ../checkpoints/fusion/fuse_model.ckpt`   # Fusion checkpoint used for feature extraction
-- `--processes 6`                                                   # Worker processes for patch preprocessing
-- `--split-count 1`                                                 # Total number of processing splits
-- `--split-index 0`                                                 # Index of the current split to execute
-- `--space-block-size 90`                                           # Spatial block size per chunk
-- `--log-level INFO`                                                # Logging level
-
-Example CLI override:
+Example CLI command:
 
 ```bash
 python feature_cube_torch.py \
-  --cuda-device cuda:1 \
-  --batch-size 96 \
-  --cube-ids 000003 000008 000022 \
-  --processes 6 \
-  --split-count 2 \
-  --split-index 0 \
-  --space-block-size 90 \
-  --log-level DEBUG
+  --cuda-device cuda:1                                             # GPU used for inference \
+  --batch-size 128                                                 # Number of patches per forward pass \
+  --base-path /net/data_ssd/deepfeatures/trainingcubes             # Input directory of the Sentinel-2 base cubes \
+  --merged-path /net/data_ssd/deepfeatures/s1_s2_cubes             # Cache directory for merged Sentinel-1/2 cubes \
+  --output-path /net/data_ssd/deepfeatures/sciencecubes_processed  # Output directory for the final feature cubes \
+  --checkpoint-path ../checkpoints/fusion/fuse_model.ckpt          # Fusion checkpoint used for feature extraction \
+  --processes 4                                                    # Worker processes for patch preprocessing \
+  --split-count 1                                                  # Total number of spatial splits for distributed processing \
+  --split-index 0                                                  # Index of the current split to process \
+  --space-block-size 90                                            # Spatial block size used during cube traversal \
+  --cube-ids 000003 000008 000022                                  # Cube IDs to process \
+  --log-level INFO                                                 # Logging level
 ```
 
 This is the main feature extraction script for the fused Sentinel-1/2 setup. It
