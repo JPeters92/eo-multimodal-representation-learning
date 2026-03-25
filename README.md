@@ -22,7 +22,7 @@ Clone the repository and create the conda environment:
 
 ```bash
 git clone git@github.com:JPeters92/eo-multimodal-representation-learning.git
-cd sentinel-multimodal-representations
+cd eo-multimodal-representation-learning
 conda env create -f environment.yml
 conda activate emb-venv
 ```
