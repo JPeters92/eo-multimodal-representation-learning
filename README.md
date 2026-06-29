@@ -28,9 +28,10 @@ conda activate emb-venv
 ```
 ## Workflow
 
-The repository is organized into five main modules:
+The repository is organized into six main modules:
 
-- [`dataset`](dataset/README.md): data access, preprocessing, array preparation, and HDF5 dataset creation
+- [`s2_training_cubes`](s2_training_cubes/README.md): sampling sites and generating Sentinel-2 training cubes
+- [`dataset`](dataset/README.md): Senitnel-1 & Sentinel-2 alignment, data access, preprocessing, array preparation, and HDF5 dataset creation
 - [`model`](model/README.md): modality-specific and fusion model definitions, losses, and architectural components
 - [`training`](training/README.md): modality-specific training, fusion training, validation, and loss visualization
 - [`feature_cube`](feature_cube/README.md): generation and inspection of latent feature cubes
@@ -38,10 +39,11 @@ The repository is organized into five main modules:
 
 The core workflow is:
 
-1. [`dataset/train_dataset.py`](dataset/train_dataset.py) to prepare aligned Sentinel-based HDF5 training data
-2. [`training/train_modality.py`](training/train_modality.py) for `s1` and `s2` to train the modality-specific encoders and decoders
-3. [`training/train_fusion.py`](training/train_fusion.py) to train the shared fusion model on aligned Sentinel-1 and Sentinel-2 inputs
-4. [`feature_cube/feature_cube_torch.py`](feature_cube/feature_cube_torch.py) to generate latent feature cubes for downstream tasks
+1. [`s2_training_cubes`](s2_training_cubes/README.md) to sample locations and build Sentinel-2 source cubes
+2. [`dataset/train_dataset.py`](dataset/train_dataset.py) to prepare aligned Sentinel-based HDF5 training data
+3. [`training/train_modality.py`](training/train_modality.py) for `s1` and `s2` to train the modality-specific encoders and decoders
+4. [`training/train_fusion.py`](training/train_fusion.py) to train the shared fusion model on aligned Sentinel-1 and Sentinel-2 inputs
+5. [`feature_cube/feature_cube_torch.py`](feature_cube/feature_cube_torch.py) to generate latent feature cubes for downstream tasks
 
 For downstream evaluation such as GPP modelling, continue in [`GPP_modelling`](GPP_modelling/README.md).
 
