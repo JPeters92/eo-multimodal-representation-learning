@@ -1,4 +1,4 @@
-# Cube Generation
+# Sentinel-2 Cube Generation
 
 This module handles the **generation of Sentinel-2 training data cubes**, including:
 
