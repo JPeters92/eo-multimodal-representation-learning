@@ -31,7 +31,7 @@ conda activate emb-venv
 The repository is organized into six main modules:
 
 - [`s2_training_cubes`](s2_training_cubes/README.md): sampling sites and generating Sentinel-2 training cubes
-- [`dataset`](dataset/README.md): Senitnel-1 & Sentinel-2 alignment, data access, preprocessing, array preparation, and HDF5 dataset creation
+- [`dataset`](dataset/README.md): Senitnel-1 & Sentinel-2 alignment, preprocessing, array preparation, and HDF5 dataset creation
 - [`model`](model/README.md): modality-specific and fusion model definitions, losses, and architectural components
 - [`training`](training/README.md): modality-specific training, fusion training, validation, and loss visualization
 - [`feature_cube`](feature_cube/README.md): generation and inspection of latent feature cubes
