@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Set, Dict
 import torch
 import torch.nn as nn
+from config import CUBE_IDS, INCLUDE_STD_FEATURES
 
 # ------------------------
 # Project imports
@@ -28,17 +29,17 @@ IN_DIR   = Path("/net/data_ssd/deepfeatures/sciencecubes_processed")
 OUT_DIR  = Path("./gpp_compare_out")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-CUBE_IDS = [ "003", "027", "022" ]
-
 FEATURE_SOURCE = "linear"
 FEATURE_SOURCE_CONFIG = {
     "ucm_flux": {
         "path_template": "s1_s2_{cid}_mean_ucm_flux.zarr",
         "var_name": "feature_mean_ucm",
+        "std_var_name": None,
     },
     "linear": {
         "path_template": "s1_s2_{cid}_mean_linear.zarr",
         "var_name": "feature_mean_linear",
+        "std_var_name": "feature_std_linear",
     },
 }
 
@@ -90,7 +91,7 @@ def detect_flux_years_for_site(site: str, root: Path) -> Set[int]:
 def _safe(da: xr.DataArray) -> xr.DataArray:
     return xr.where(np.isfinite(da), da, np.nan)
 
-def _open_cube_da(cid: str) -> Tuple[xr.DataArray, Optional[int]]:
+def _open_cube_da(cid: str) -> Tuple[xr.DataArray, List[int]]:
     if FEATURE_SOURCE not in FEATURE_SOURCE_CONFIG:
         raise ValueError(f"Unknown FEATURE_SOURCE: {FEATURE_SOURCE}")
     cfg = FEATURE_SOURCE_CONFIG[FEATURE_SOURCE]
@@ -101,9 +102,30 @@ def _open_cube_da(cid: str) -> Tuple[xr.DataArray, Optional[int]]:
     var_name = cfg["var_name"]
     if var_name not in ds:
         raise KeyError(f"{var_name} not in {z}")
-    da = _safe(ds[var_name]).sortby("time")  # (feature, time)
+    mean_da = _safe(ds[var_name]).sortby("time")  # (feature, time)
+    radiation_indices: List[int] = []
     ridx = ds[var_name].attrs.get("radiation_feature_index", None)
-    return da, int(ridx) if ridx is not None else None
+    if ridx is not None:
+        radiation_indices.append(int(ridx))
+
+    if not INCLUDE_STD_FEATURES:
+        return mean_da, radiation_indices
+
+    std_var_name = cfg.get("std_var_name")
+    if not std_var_name:
+        raise ValueError(f"{FEATURE_SOURCE} does not provide std features.")
+    if std_var_name not in ds:
+        raise KeyError(f"{std_var_name} not in {z}")
+
+    std_da = _safe(ds[std_var_name]).sortby("time")
+    if mean_da.sizes["time"] != std_da.sizes["time"] or mean_da.sizes["feature"] != std_da.sizes["feature"]:
+        raise ValueError(f"Mean/std feature shapes do not match in {z}")
+
+    da = xr.concat([mean_da, std_da], dim="feature")
+    da = da.assign_coords(feature=np.arange(da.sizes["feature"]))
+    if ridx is not None:
+        radiation_indices.append(int(ridx) + mean_da.sizes["feature"])
+    return da, radiation_indices
 
 def _parse_date_col(df: pd.DataFrame) -> pd.Series:
     candidates = [c for c in df.columns if c.upper().startswith("TIMESTAMP")]
@@ -153,8 +175,11 @@ def _load_fluxnet_daily_gpp(site: str, qc_thresh: float = QC_THRESH) -> pd.Serie
         if qc.max(skipna=True) <= 1.1:
             qc = qc * 100.0
 
-        valid_mask = qc >= qc_thresh
-        valid_days = gpp[valid_mask & gpp.notna() & np.isfinite(gpp)]
+        if qc_thresh is None:
+            valid_days = gpp[gpp.notna() & np.isfinite(gpp)]
+        else:
+            valid_mask = qc >= qc_thresh
+            valid_days = gpp[valid_mask & gpp.notna() & np.isfinite(gpp)]
         if not valid_days.empty:
             parts.append(valid_days)
 
@@ -175,20 +200,21 @@ def _standardize_radiation(da_ft: xr.DataArray, ridx: Optional[int]) -> xr.DataA
     da.loc[dict(feature=ridx)] = (rad - RAD_MEAN) / (RAD_STD or 1.0)
     return da
 
-def _apply_radiation_mode(da_ft: xr.DataArray, ridx: Optional[int], mode: str) -> xr.DataArray:
+def _apply_radiation_mode(da_ft: xr.DataArray, radiation_indices: List[int], mode: str) -> xr.DataArray:
     mode = mode.lower()
     if mode not in {"include", "exclude"}:
         raise ValueError(f"Invalid radiation mode: {mode}")
-    if ridx is None:
+    if not radiation_indices:
         return da_ft
     if mode == "include":
-        return _standardize_radiation(da_ft, ridx)
+        return _standardize_radiation(da_ft, radiation_indices[0])
     # exclude -> drop radiation feature
+    drop_indices = sorted(set(int(i) for i in radiation_indices))
     try:
-        return da_ft.drop_isel(feature=[ridx])
+        return da_ft.drop_isel(feature=drop_indices)
     except Exception:
         sel = np.ones(da_ft.sizes["feature"], dtype=bool)
-        sel[ridx] = False
+        sel[drop_indices] = False
         return da_ft.isel(feature=np.where(sel)[0])
 
 def _trim_to_flux_years(da_ft: xr.DataArray, years: List[int]) -> xr.DataArray:
@@ -270,18 +296,20 @@ def load_model(ckpt_path: str, device: torch.device) -> Tuple[GPPTemporalTransfo
     assert time_first, "Model was trained with time_first=True; expected (B,T,F) inputs."
     return model, f_model, ckpt_label
 
-def align_X_to_model(X: np.ndarray, f_model: int, ridx: Optional[int]) -> np.ndarray:
+def align_X_to_model(X: np.ndarray, f_model: int, radiation_indices: List[int]) -> np.ndarray:
     f_data = X.shape[-1]
     if f_data == f_model:
         return X
-    if f_data == f_model + 1:
-        drop_idx = ridx if ridx is not None else (f_data - 1)
-        keep = [i for i in range(f_data) if i != drop_idx]
+    drop_indices = sorted(set(int(i) for i in radiation_indices))
+    if drop_indices and f_data - len(drop_indices) == f_model:
+        keep = [i for i in range(f_data) if i not in drop_indices]
         return X[..., keep]
-    if f_data + 1 == f_model:
-        insert_idx = ridx if ridx is not None else f_data
-        zeros = np.zeros((*X.shape[:-1], 1), dtype=X.dtype)
-        return np.concatenate([X[..., :insert_idx], zeros, X[..., insert_idx:]], axis=-1)
+    if drop_indices and f_data + len(drop_indices) == f_model:
+        X_out = X
+        for insert_idx in drop_indices:
+            zeros = np.zeros((*X_out.shape[:-1], 1), dtype=X_out.dtype)
+            X_out = np.concatenate([X_out[..., :insert_idx], zeros, X_out[..., insert_idx:]], axis=-1)
+        return X_out
     raise ValueError(f"Cannot align features: data has {f_data}, model expects {f_model}.")
 
 # ------------------------
@@ -397,14 +425,14 @@ def main():
             print(f"→ {cid} ({site}): no flux years — skip"); continue
 
         try:
-            da_ft, ridx = _open_cube_da(cid)
+            da_ft, radiation_indices = _open_cube_da(cid)
         except Exception as e:
             print(f"⚠️ Skip {cid}: {e}"); continue
 
         da_ft = _trim_to_flux_years(da_ft, flux_years)
         if da_ft.sizes.get("time", 0) < WINDOW:
             print(f"→ {cid} ({site}): too few days after trim — skip"); continue
-        da_ft = _apply_radiation_mode(da_ft, ridx, RADIATION_FOR_WINDOWS)
+        da_ft = _apply_radiation_mode(da_ft, radiation_indices, RADIATION_FOR_WINDOWS)
 
         try:
             gpp_series = _load_fluxnet_daily_gpp(site, qc_thresh=QC_THRESH)
@@ -417,7 +445,7 @@ def main():
             print(f"→ {cid} ({site}): no valid windows — skip"); continue
 
         # align and predict for 7 features
-        X7 = align_X_to_model(X_base, f_model=f7, ridx=ridx)
+        X7 = align_X_to_model(X_base, f_model=f7, radiation_indices=radiation_indices)
         with torch.no_grad():
             Xt7 = torch.tensor(X7, dtype=torch.float32, device=device)
             y7_std = model7(Xt7).detach().cpu().numpy()

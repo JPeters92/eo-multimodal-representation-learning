@@ -5,6 +5,7 @@ import pandas as pd
 import xarray as xr
 from pathlib import Path
 from typing import Optional, Tuple, List, Set
+from config import CUBE_IDS, FEATURE_SET_TAG, INCLUDE_STD_FEATURES
 from sites import sites_dict
 
 # ------------------------
@@ -13,11 +14,6 @@ from sites import sites_dict
 ROOT_DIR = Path("/net/data/Fluxnet/")
 IN_DIR   = Path("/net/data_ssd/deepfeatures/sciencecubes_processed")
 OUT_DIR  = Path("/net/data_ssd/deepfeatures/sciencecubes_processed")
-
-# Process these cubes; by default use all known keys from sites_dict
-# (Replace with a manual subset if you like)
-
-CUBE_IDS = [ "003", "008", "005", "028", "027", "036", "011", "021", "022"]
 
 # Feature source to use for GPP dataset creation.
 # "ucm_flux" reads the original processed cube with flux-aware UCM filling.
@@ -28,11 +24,13 @@ FEATURE_SOURCE_CONFIG = {
     "ucm_flux": {
         "path_template": "s1_s2_{cid}_mean_ucm_flux.zarr",
         "var_name": "feature_mean_ucm",
+        "std_var_name": None,
         "output_tag": "ucm_flux",
     },
     "linear": {
         "path_template": "s1_s2_{cid}_mean_linear.zarr",
         "var_name": "feature_mean_linear",
+        "std_var_name": "feature_std_linear",
         "output_tag": "linear",
     },
 }
@@ -83,8 +81,8 @@ def detect_flux_years_for_site(site: str, root: Path) -> Set[int]:
 def _safe(da: xr.DataArray) -> xr.DataArray:
     return xr.where(np.isfinite(da), da, np.nan)
 
-def _open_cube_da(cid: str) -> Tuple[xr.DataArray, Optional[int]]:
-    """Open (feature,time) DataArray + radiation index."""
+def _open_cube_da(cid: str) -> Tuple[xr.DataArray, List[int]]:
+    """Open (feature,time) DataArray and positional radiation feature indices."""
     if FEATURE_SOURCE not in FEATURE_SOURCE_CONFIG:
         raise ValueError(f"Unknown FEATURE_SOURCE: {FEATURE_SOURCE}")
     cfg = FEATURE_SOURCE_CONFIG[FEATURE_SOURCE]
@@ -95,9 +93,30 @@ def _open_cube_da(cid: str) -> Tuple[xr.DataArray, Optional[int]]:
     var_name = cfg["var_name"]
     if var_name not in ds:
         raise KeyError(f"{var_name} not in {z}")
-    da = _safe(ds[var_name]).sortby("time")
+    mean_da = _safe(ds[var_name]).sortby("time")
+    radiation_indices: List[int] = []
     ridx = ds[var_name].attrs.get("radiation_feature_index", None)
-    return da, int(ridx) if ridx is not None else None
+    if ridx is not None:
+        radiation_indices.append(int(ridx))
+
+    if not INCLUDE_STD_FEATURES:
+        return mean_da, radiation_indices
+
+    std_var_name = cfg.get("std_var_name")
+    if not std_var_name:
+        raise ValueError(f"{FEATURE_SOURCE} does not provide std features.")
+    if std_var_name not in ds:
+        raise KeyError(f"{std_var_name} not in {z}")
+
+    std_da = _safe(ds[std_var_name]).sortby("time")
+    if mean_da.sizes["time"] != std_da.sizes["time"] or mean_da.sizes["feature"] != std_da.sizes["feature"]:
+        raise ValueError(f"Mean/std feature shapes do not match in {z}")
+
+    da = xr.concat([mean_da, std_da], dim="feature")
+    da = da.assign_coords(feature=np.arange(da.sizes["feature"]))
+    if ridx is not None:
+        radiation_indices.append(int(ridx) + mean_da.sizes["feature"])
+    return da, radiation_indices
 
 def _parse_date_col(df: pd.DataFrame) -> pd.Series:
     cols = [c.strip().lstrip("\ufeff") for c in df.columns]
@@ -178,7 +197,7 @@ def _load_fluxnet_daily_gpp(site: str) -> pd.Series:
     return gpp
 
 def _standardize_radiation(da_ft: xr.DataArray, ridx: Optional[int]) -> xr.DataArray:
-    """Standardize the radiation feature (if present)."""
+    """Standardize the mean radiation feature (if present)."""
     if ridx is None:
         return da_ft
     da = da_ft.copy()
@@ -186,25 +205,26 @@ def _standardize_radiation(da_ft: xr.DataArray, ridx: Optional[int]) -> xr.DataA
     da.loc[dict(feature=ridx)] = (rad - RAD_MEAN) / (RAD_STD or 1.0)
     return da
 
-def _apply_radiation_mode(da_ft: xr.DataArray, ridx: Optional[int]) -> xr.DataArray:
+def _apply_radiation_mode(da_ft: xr.DataArray, radiation_indices: List[int]) -> xr.DataArray:
     """Include (with standardization) or exclude the radiation feature."""
     mode = RADIATION_MODE.lower()
     if mode not in {"include", "exclude"}:
         raise ValueError(f"Invalid RADIATION_MODE: {RADIATION_MODE}")
 
-    if ridx is None:
+    if not radiation_indices:
         # If we don't know the radiation index, just return as-is
         return da_ft
 
     if mode == "include":
-        return _standardize_radiation(da_ft, ridx)
+        return _standardize_radiation(da_ft, radiation_indices[0])
 
     # mode == "exclude"
+    drop_indices = sorted(set(int(i) for i in radiation_indices))
     try:
-        return da_ft.drop_isel(feature=[ridx])
+        return da_ft.drop_isel(feature=drop_indices)
     except Exception:
         sel = np.ones(da_ft.sizes["feature"], dtype=bool)
-        sel[ridx] = False
+        sel[drop_indices] = False
         return da_ft.isel(feature=np.where(sel)[0])
 
 def _trim_to_years(da_ft: xr.DataArray, years: Set[int]) -> xr.DataArray:
@@ -283,7 +303,7 @@ def main():
             continue
 
         try:
-            da_ft, ridx = _open_cube_da(cid)
+            da_ft, radiation_indices = _open_cube_da(cid)
         except Exception as e:
             print(f"⚠️  Skip {cid}: {e}")
             continue
@@ -295,7 +315,7 @@ def main():
             continue
 
         # include or exclude radiation as requested
-        da_ft = _apply_radiation_mode(da_ft, ridx)
+        da_ft = _apply_radiation_mode(da_ft, radiation_indices)
 
         try:
             gpp = _load_fluxnet_daily_gpp(site)
@@ -345,8 +365,8 @@ def main():
         y_tr = np.concatenate(y_tr_list, axis=0)
         meta_tr = pd.concat(meta_tr_list, ignore_index=True)
 
-        npz_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{rad_tag}_gppstd_train.npz"
-        csv_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{rad_tag}_train.csv"
+        npz_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_gppstd_train.npz"
+        csv_tr = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_tr}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_train.csv"
 
         np.savez_compressed(npz_tr, X=X_tr, y=y_tr)
         meta_tr.to_csv(csv_tr, index=False)
@@ -364,8 +384,8 @@ def main():
         y_va = np.concatenate(y_va_list, axis=0)
         meta_va = pd.concat(meta_va_list, ignore_index=True)
 
-        npz_va = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{rad_tag}_gppstd_val.npz"
-        csv_va = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{rad_tag}_val.csv"
+        npz_va = OUT_DIR / f"gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_gppstd_val.npz"
+        csv_va = OUT_DIR / f"gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}_years{years_tag_va}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_val.csv"
 
         np.savez_compressed(npz_va, X=X_va, y=y_va)
         meta_va.to_csv(csv_va, index=False)

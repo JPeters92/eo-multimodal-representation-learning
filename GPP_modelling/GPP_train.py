@@ -4,8 +4,10 @@ import time
 import math
 import itertools
 import random
+import traceback
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import lightning.pytorch as pl
@@ -13,6 +15,7 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint, EarlyStopping, LearningRateMonitor, TQDMProgressBar
 )
 from lightning.pytorch.loggers import CSVLogger
+from config import FEATURE_SET_TAG, INCLUDE_STD_FEATURES
 
 # ---- Your modules ----
 from GPP_loader import make_loaders
@@ -33,9 +36,6 @@ def set_seed(seed=42):
 
 set_seed(42)
 torch.set_float32_matmul_precision('high')  # RTX A6000 Tensor Cores optimization
-
-
-
 
 
 BASE = "/net/data_ssd/deepfeatures/sciencecubes_processed"
@@ -72,41 +72,53 @@ def build_dataset_paths(base: str):
 
     train_npz = (
         f"{base}/gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}"
-        f"_years{TRAIN_YEARS}_{source_tag}_{rad_tag}_gppstd_train.npz"
+        f"_years{TRAIN_YEARS}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_gppstd_train.npz"
     )
     train_meta = (
         f"{base}/gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}"
-        f"_years{TRAIN_YEARS}_{source_tag}_{rad_tag}_train.csv"
+        f"_years{TRAIN_YEARS}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_train.csv"
     )
     val_npz = (
         f"{base}/gpp_{WINDOW}day_samples_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}"
-        f"_years{VAL_YEARS}_{source_tag}_{rad_tag}_gppstd_val.npz"
+        f"_years{VAL_YEARS}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_gppstd_val.npz"
     )
     val_meta = (
         f"{base}/gpp_{WINDOW}day_samples_meta_stride{STRIDE}_overlap{OVERLAP}_qc{QC_THRESH}"
-        f"_years{VAL_YEARS}_{source_tag}_{rad_tag}_val.csv"
+        f"_years{VAL_YEARS}_{source_tag}_{FEATURE_SET_TAG}_{rad_tag}_val.csv"
     )
     return train_npz, train_meta, val_npz, val_meta
 
 
+def infer_num_features(npz_path: str) -> int:
+    with np.load(npz_path, mmap_mode="r") as data:
+        x = data["X"]
+        if x.ndim != 3:
+            raise ValueError(f"Expected X to have 3 dims in {npz_path}, got shape {x.shape}")
+        return int(x.shape[1])
+
+
 TRAIN_NPZ, TRAIN_META, VAL_NPZ, VAL_META = build_dataset_paths(BASE)
-RUN_TAG = f"{FEATURE_SOURCE}_{RADIATION_MODE}_{TRAIN_YEARS}_to_{VAL_YEARS}"
+BASE_NUM_FEATURES = infer_num_features(TRAIN_NPZ)
+RUN_TAG = f"{FEATURE_SOURCE}_{FEATURE_SET_TAG}_{RADIATION_MODE}_{TRAIN_YEARS}_to_{VAL_YEARS}"
 RESULTS_CSV = f"grid_results_{RUN_TAG}.csv"
 LOG_DIR = f"grid_logs_2_{RUN_TAG}"
 
 
 SPACE  = {
-        "num_features":  [7],
-        "batch_size":    [6, 12],          # <- you asked for these
+        "num_features":  [BASE_NUM_FEATURES],
+        #"batch_size":    [6, 12],          # <- you asked for these
+        "batch_size":    [12],          # <- you asked for these
         "d_model":       [96],
-        "nhead":         [4, 8, 16],          # filtered to divide d_model
+        "nhead":         [8],          # filtered to divide d_model
+        #"nhead":         [4, 8, 16],          # filtered to divide d_model
         "num_layers":    [3, 4],
         "dim_ff":        [1024],
         "dropout":       [0.05],
         "pool":          ["last",],
         "lr":            [1e-4],
         "weight_decay":  [1e-6],
-        "warmup_steps":  [200, 300, 400],
+        #"warmup_steps":  [200, 300, 400],
+        "warmup_steps":  [300],
         "reduce_pat":    [7],
         "reduce_factor": [0.1],
     }
@@ -139,6 +151,12 @@ def run_once(params, max_epochs=MAX_EPOCHS, log_dir=LOG_DIR):
         time_first=True, num_workers=8, pin_memory=True,
         #feature_slice = list(range(6))
     )
+
+    train_batch = next(iter(loaders["train"]))
+    X0, y0 = train_batch[:2]
+    print(f"[data] TRAIN_NPZ={TRAIN_NPZ}")
+    print(f"[data] VAL_NPZ={VAL_NPZ}")
+    print(f"[data] first train batch X={tuple(X0.shape)} y={tuple(y0.shape)}")
 
 
     model = GPPTemporalTransformer(
@@ -197,12 +215,14 @@ def run_once(params, max_epochs=MAX_EPOCHS, log_dir=LOG_DIR):
         best_val = float(ckpt_cb.best_model_score.cpu().item()) if ckpt_cb.best_model_score is not None else math.inf
         best_path = ckpt_cb.best_model_path or ""
     except RuntimeError as e:
+        traceback.print_exc()
         if "out of memory" in str(e).lower():
             status = "oom"
         else:
-            status = f"runtime_error: {e.__class__.__name__}"
+            status = f"runtime_error: {e}"
     except Exception as e:
-        status = f"error: {e.__class__.__name__}"
+        traceback.print_exc()
+        status = f"error: {e}"
     wall = time.time() - t0
 
     return {
