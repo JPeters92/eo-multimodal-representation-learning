@@ -1,6 +1,6 @@
 # Cube Generation
 
-This module handles the **generation of training data cubes**, including:
+This module handles the **generation of Sentinel-2 training data cubes**, including:
 
 - Sampling training sites  
 - Retrieving Sentinel-2 data via [CDSE STAC API](https://browser.stac.dataspace.copernicus.eu/collections/sentinel-2-l2a)
