@@ -1,34 +1,34 @@
-import argparse
-import logging
 import os
-import pathlib
 import sys
 import time
+import torch
+import logging
+import pathlib
 import warnings
-from multiprocessing import Lock, Pool, Value
+import argparse
 
 import numpy as np
-import torch
 import xarray as xr
 from tqdm import tqdm
+from multiprocessing import Lock, Pool, Value
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from dataset.preprocess_sentinel import extract_sentinel_patches, merge_s1_s2
 from dataset.utils import compute_time_gaps, extract_center_coordinates
-from model.model_fusion import FusedS1S2
 from model.model_s1_s2 import TransformerAE
+from model.model_fusion import FusedS1S2
 
 
 parser = argparse.ArgumentParser(
     description="Extract fused Sentinel-1/2 feature cubes from science or training cubes.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-parser.add_argument("--cuda-device", default="cuda:0", help="Torch device used for inference.")
-parser.add_argument("--batch-size", type=int, default=64, help="Inference batch size for extracted patches.")
+parser.add_argument("--cuda-device", default="cuda:3", help="Torch device used for inference.")
+parser.add_argument("--batch-size", type=int, default=128, help="Inference batch size for extracted patches.")
 parser.add_argument(
     "--base-path",
-    default="/net/data/deepfeatures/trainingcubes",
+    default="/net/data_ssd/deepfeatures/trainingcubes",
     help="Directory containing the source Sentinel-2 cubes used as the basis for S1/S2 merging.",
 )
 parser.add_argument(
@@ -209,10 +209,11 @@ def extract_sentinel_patches_pool(
 
 
 def default_cube_ids():
-    existing = {"043", "027", "442", "053", "034", "022", "368", "348", "356", "449", "212", "228"}
-    all_nums = [f"{i:03d}" for i in range(500)]
-    cube_nums = [num for num in all_nums if num not in existing and int(num) > 248]
-    return [f"{int(num):06d}" for num in cube_nums]
+    return ["000212", "000228"]
+
+
+def normalize_cube_ids(cube_ids):
+    return [f"{int(cube_id):06d}" for cube_id in cube_ids]
 
 
 def create_empty_dataset(feature_names, xs, ys, out_path, times=None, dtype=np.float32):
@@ -429,11 +430,23 @@ class XrFeatureDataset:
     def _compute_split_chunk_range(self, total_chunks, split_count, split_index):
         if total_chunks <= 0:
             return 0, 0
+        if self.chunk_split <= 0:
+            raise ValueError("chunk_split must be positive")
+
         frames_total = total_chunks // self.chunk_split
-        frames_per_split = frames_total // split_count
-        start_frame = split_index * frames_per_split
-        end_frame = (split_index + 1) * frames_per_split
-        return start_frame * self.chunk_split, min(end_frame * self.chunk_split, total_chunks)
+        if frames_total * self.chunk_split != total_chunks:
+            raise ValueError(
+                f"total_chunks ({total_chunks}) must be divisible by chunk_split ({self.chunk_split})"
+            )
+
+        base_frames_per_split, remainder = divmod(frames_total, split_count)
+        extra_frame = 1 if split_index < remainder else 0
+        start_frame = (split_index * base_frames_per_split) + min(split_index, remainder)
+        end_frame = min(start_frame + base_frames_per_split + extra_frame, frames_total)
+
+        start_chunk = start_frame * self.chunk_split
+        end_chunk = end_frame * self.chunk_split
+        return start_chunk, min(end_chunk, total_chunks)
 
     def __next__(self):
         warnings.filterwarnings("ignore")
@@ -636,8 +649,9 @@ def main():
 
     device = torch.device(CUDA_DEVICE)
     model = build_model(device)
-    cube_nums = args.cube_ids if args.cube_ids else default_cube_ids()
+    cube_nums = normalize_cube_ids(args.cube_ids) if args.cube_ids else default_cube_ids()
     logger.info("Cube count: %s", len(cube_nums))
+    logger.info("Cube IDs: %s", ", ".join(cube_nums))
 
     for cube_num in cube_nums:
         process_cube(cube_num, model, device)
