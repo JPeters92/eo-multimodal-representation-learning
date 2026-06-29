@@ -1,0 +1,15 @@
+name: cubegen
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pandas
+  - segmentation-models-pytorch
+  - sen2nbar
+  - spyndex
+  - torch
+  - utm
+  - xarray
+  - xcube >=1.11.0
+  - xcube-stac >=1.2.1
+  - zarr

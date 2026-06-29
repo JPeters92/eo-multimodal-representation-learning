@@ -21,8 +21,8 @@ We recommend using Python 3.12 and CUDA 12.1.
 Clone the repository and create the conda environment:
 
 ```bash
-git clone git@github.com:JPeters92/sentinel-multimodal-representations.git
-cd sentinel-multimodal-representations
+git clone git@github.com:JPeters92/eo-multimodal-representation-learning.git
+cd eo-multimodal-representation-learning
 conda env create -f environment.yml
 conda activate emb-venv
 ```
