@@ -50,10 +50,11 @@ For downstream evaluation such as GPP modelling, continue in [`GPP_modelling`](G
 ## Attribution
 
 ```bibtex
-@article{peters2025context,
+@article{peters2026context,
   title={Context-Aware Multimodal Representation Learning for Spatio-Temporally Explicit Environmental Modelling},
   author={Peters, Julia and Mora, Karin and Mahecha, Miguel D and Ji, Chaonan and Montero, David and Mosig, Clemens and Kraemer, Guido},
-  journal={arXiv preprint arXiv:2511.11706},
-  year={2025}
+  journal={IEEE Transactions on Geoscience and Remote Sensing},
+  year={2026},
+  publisher={IEEE}
 }
 ```
